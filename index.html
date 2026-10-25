@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0a0b0d">
 <meta name="robots" content="noindex, nofollow">
+<script>
+// Apply a saved light/dark choice before anything is drawn, so the page never flashes the other theme.
+try { var t = JSON.parse(localStorage.getItem('engsnd.theme')); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
 <title>Tesla Engine Sound</title>
 <!--
   Tesla Engine Sound. Eight engines synthesized live, sample by sample, from a per-cylinder model:
@@ -21,111 +25,148 @@
   - markeasting/engine-audio (MIT): throttle/load/RPM driving a layered Web Audio graph.
 -->
 <style>
+/* Night cluster (default) and day cluster. The car's own light/dark setting picks one unless the driver chose. */
 :root{
-  --bg:#0a0b0d; --panel:#121419; --panel2:#181b21; --line:#23262e; --text:#eceef2; --dim:#868c99;
-  --accent:#ff5a36; --accent-soft:rgba(255,90,54,.18); --ok:#4fd18b;
   color-scheme:dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
+  --bg:#0c1015; --bar:#131922; --face:#0f141b; --rim:#212a35; --line:#27313d; --track:#1c242e;
+  --ink:#e8edf3; --dim:#8a96a5; --faint:#4e5967;
+  --needle:#ff5b2e; --red:#e5392b; --accent:#ff5b2e; --accent-soft:rgba(255,91,46,.15); --ok:#41d18f;
+  --scrim:rgba(8,10,13,.88);
+  font-family:"Bahnschrift","DIN Alternate","DIN Next LT Pro","Barlow","Roboto Condensed","Arial Narrow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#e6e9ed; --bar:#f4f6f8; --face:#fcfdfd; --rim:#c9d0d8; --line:#d2d8df; --track:#e2e6eb;
+  --ink:#11161c; --dim:#5b6571; --faint:#9aa4af;
+  --needle:#e23f17; --red:#cf2e22; --accent:#e23f17; --accent-soft:rgba(226,63,23,.11); --ok:#0f8f57;
+  --scrim:rgba(226,230,235,.92);
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme:light;
+    --bg:#e6e9ed; --bar:#f4f6f8; --face:#fcfdfd; --rim:#c9d0d8; --line:#d2d8df; --track:#e2e6eb;
+    --ink:#11161c; --dim:#5b6571; --faint:#9aa4af;
+    --needle:#e23f17; --red:#cf2e22; --accent:#e23f17; --accent-soft:rgba(226,63,23,.11); --ok:#0f8f57;
+    --scrim:rgba(226,230,235,.92);
+  }
 }
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
 body,h2,h3,p,ul,dl,dd{margin:0}
 html{height:100%;background:var(--bg)}
-body{background:var(--bg);color:var(--text);overscroll-behavior:none;
-  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
-body{display:flex;flex-direction:column;min-height:100%;padding-block:20px 16px;
-  padding-left:max(24px, env(safe-area-inset-left, 0px));padding-right:max(24px, env(safe-area-inset-right, 0px));gap:16px}
+/* One screen, no scrolling: header, the cluster (takes whatever height is left), engine strip, controls. */
+body{background:var(--bg);color:var(--ink);overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+  height:100vh;height:100dvh;overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;gap:clamp(8px,1.6vh,18px);
+  padding:clamp(10px,1.8vh,20px) max(20px,env(safe-area-inset-right,0px)) clamp(10px,1.8vh,20px) max(20px,env(safe-area-inset-left,0px))}
 button{font:inherit;color:inherit;touch-action:manipulation}
-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .banner{background:var(--accent);color:#fff;border-radius:14px;padding:14px 18px;font-size:16px;line-height:1.4}
-header{display:flex;align-items:center;gap:12px}
-.brand{font-weight:700;letter-spacing:.2em;font-size:13px;color:var(--dim)}
-.diag{margin-left:auto;color:var(--dim);font-size:12px;letter-spacing:.04em;text-align:right}
+header{display:flex;align-items:center;gap:12px;min-height:44px}
+.brand{font-weight:600;font-size:16px;color:var(--dim)}
+.keys{display:none;color:var(--faint);font-size:13px}
+@media (hover:hover) and (pointer:fine) and (min-width:1100px){ .keys{display:block} }
+.diag{margin-left:auto;color:var(--faint);font-size:12px;text-align:right}
 .diag.err{color:var(--accent)}
-.pill{padding:9px 16px;border-radius:999px;background:var(--panel);border:1px solid var(--line);
+@media (hover:none),(pointer:coarse){ .diag:not(.err){visibility:hidden} }
+.pill{padding:9px 16px;border-radius:999px;background:var(--bar);border:1px solid var(--line);
   font-size:15px;color:var(--dim);display:flex;align-items:center;gap:10px;white-space:nowrap;min-height:44px}
 button.pill{cursor:pointer}
-.pill i{width:9px;height:9px;border-radius:50%;background:#3a3e48;display:block;flex:none}
-.pill.on{color:var(--text)} .pill.on i{background:var(--accent)}
-.pill.err{color:var(--accent);border-color:rgba(255,90,54,.4)} .pill.err i{background:var(--accent)}
-.pill.ok{color:var(--text)} .pill.ok i{background:var(--ok)}
-main{flex:1;display:grid;grid-template-columns:1fr minmax(220px,280px);gap:16px;min-height:0}
-.cluster{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:24px 32px;
-  display:flex;flex-direction:column;justify-content:center;gap:22px;min-width:0}
-.engine{color:var(--dim);font-size:15px;letter-spacing:.06em}
-.engine b{color:var(--text);font-weight:600;letter-spacing:.02em}
-.readout{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap}
-.speed{display:flex;align-items:flex-end;gap:14px}
-.spd{font-size:clamp(76px,11vw,160px);font-weight:250;line-height:.85;font-variant-numeric:tabular-nums;letter-spacing:-.03em;min-width:2.2ch}
-.spd.stale{opacity:.4}
-.unit{background:none;border:1px solid var(--line);border-radius:12px;color:var(--dim);font-size:15px;letter-spacing:.12em;
-  min-height:44px;padding:0 12px;margin-bottom:6px;cursor:pointer}
-.gearbox{margin-left:auto;display:flex;align-items:center;gap:12px}
-.gear{text-align:center;min-width:110px}
-.gear b{display:block;font-size:clamp(56px,7vw,92px);font-weight:600;line-height:.9;font-variant-numeric:tabular-nums}
-.gear b small{font-size:.42em;color:var(--dim);font-weight:500;margin-right:4px;vertical-align:.9em}
-.gear > span{color:var(--dim);font-size:12px;letter-spacing:.18em}
-.paddle{width:64px;height:64px;border-radius:50%;border:1px solid var(--line);background:var(--panel2);font-size:30px;line-height:1;cursor:pointer}
-.paddle:active{border-color:var(--accent)}
-.rpmrow{display:flex;justify-content:space-between;align-items:baseline;color:var(--dim);font-size:12px;letter-spacing:.16em;margin-bottom:8px}
-.rpmrow b{color:var(--text);font-size:22px;font-weight:400;letter-spacing:0;font-variant-numeric:tabular-nums}
-.bar{position:relative;height:20px;border-radius:10px;background:var(--panel2);overflow:hidden}
-.bar .red{position:absolute;top:0;bottom:0;right:0;background:var(--accent-soft)}
-.bar .fill{position:absolute;top:0;bottom:0;left:0;width:0;background:var(--text);border-radius:10px;will-change:width}
-.bar .fill.hot{background:var(--accent)}
-.ticks{display:flex;justify-content:space-between;color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums;margin-top:8px;padding:0 2px}
-.meter{display:grid;grid-template-columns:86px 1fr;align-items:center;color:var(--dim);font-size:12px;letter-spacing:.16em}
-.meter .bar{height:6px;border-radius:3px}
-.meter .fill{background:var(--accent);border-radius:3px}
-.pedals{position:relative;display:grid;min-height:280px}
-.pad{position:relative;border-radius:24px;background:var(--panel);border:1px solid var(--line);touch-action:none;
-  overflow:hidden;display:flex;justify-content:center;padding-top:22px;color:var(--dim);font-size:13px;
-  letter-spacing:.2em;cursor:ns-resize}
-.pad.active{border-color:var(--accent)}
-.pad .lvl{position:absolute;left:0;right:0;bottom:0;height:0;background:linear-gradient(to top,var(--accent),rgba(255,90,54,.15));will-change:height}
-.pad .lbl{position:relative;text-align:center;pointer-events:none}
-.pad .pct{display:block;font-size:32px;color:var(--text);letter-spacing:0;margin-top:6px;font-variant-numeric:tabular-nums;font-weight:300}
-.pad .sub{position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;letter-spacing:.08em;pointer-events:none}
+.pill i{width:9px;height:9px;border-radius:50%;background:var(--faint);display:block;flex:none}
+.pill.on{color:var(--ink)} .pill.on i{background:var(--accent)}
+.pill.err{color:var(--accent)} .pill.err i{background:var(--accent)}
+.pill.ok{color:var(--ink)} .pill.ok i{background:var(--ok)}
+.iconbtn{width:44px;height:44px;flex:none;border-radius:50%;border:1px solid var(--line);background:var(--bar);color:var(--dim);
+  display:grid;place-items:center;cursor:pointer;padding:0}
+.iconbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.iconbtn[data-mode="dark"] .moon,.iconbtn[data-mode="light"] .sun{display:none}
+
+/* ---- the cluster: rev counter, gear, speedometer (and the throttle pad when there is no GPS) ---- */
+main{display:grid;grid-template-columns:minmax(0,1fr) clamp(180px,17vw,290px) minmax(0,1fr) clamp(84px,8vw,124px);
+  grid-template-rows:minmax(0,1fr);gap:clamp(8px,1.4vw,26px);min-height:0}
+body.gpsmode main{grid-template-columns:minmax(0,1fr) clamp(180px,17vw,290px) minmax(0,1fr)}
 body.gpsmode .pedals{display:none}
-body.gpsmode main{grid-template-columns:1fr}
-.picker{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin;scroll-snap-type:x proximity}
-.card{flex:1 0 128px;scroll-snap-align:start;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:18px;
-  padding:14px 16px;display:flex;flex-direction:column;gap:6px;cursor:pointer}
-.card[aria-pressed="true"]{border-color:var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--panel)}
-.card .cname{font-weight:600;font-size:16px}
-.card .cspec{color:var(--dim);font-size:12px;letter-spacing:.08em;font-variant-numeric:tabular-nums}
-.card canvas{width:100%;height:22px;display:block}
-.card .cdesc{display:none}   /* the chosen engine's description is shown above the speedo */
-/* Touchscreens (the car): no keyboard to hint at, and the audio status line only matters when something is wrong. */
-@media (hover:none), (pointer:coarse){ .hint{display:none} .diag:not(.err){visibility:hidden} }
-footer{display:grid;grid-template-columns:minmax(220px,300px) 1fr 1fr auto;gap:20px;align-items:center}
-.start{height:88px;border-radius:44px;border:0;background:var(--accent);color:#fff;font-size:21px;
-  font-weight:700;letter-spacing:.14em;cursor:pointer}
-.start.on{background:var(--panel2);color:var(--text);box-shadow:inset 0 0 0 2px var(--accent)}
+.dial{min-height:0;min-width:0;display:flex;align-items:center;justify-content:center}
+.dial svg{width:100%;height:100%;display:block}
+.d-face{fill:var(--face);stroke:var(--rim);stroke-width:2}
+.d-track{fill:none;stroke:var(--track);stroke-width:10;stroke-linecap:round}
+.d-red{fill:none;stroke:var(--red);stroke-width:10;opacity:.85}
+.d-live{fill:none;stroke:var(--needle);stroke-width:4;stroke-linecap:round}
+svg.hot .d-live{stroke:var(--red)}
+.d-tick{stroke:var(--dim);stroke-width:1.6}
+.d-tick.major{stroke:var(--ink);stroke-width:3.2}
+.d-tick.red{stroke:var(--red)}
+.d-num{fill:var(--ink);font-size:25px;font-weight:600;text-anchor:middle;dominant-baseline:central;font-variant-numeric:tabular-nums}
+.d-num.small{font-size:19px}
+.d-num.red{fill:var(--red)}
+.d-needle path{fill:var(--needle)}
+.d-hub{fill:var(--face);stroke:var(--needle);stroke-width:4}
+.d-big{fill:var(--ink);font-size:68px;font-weight:300;text-anchor:middle;font-variant-numeric:tabular-nums}
+.d-mid{fill:var(--ink);font-size:38px;font-weight:400;text-anchor:middle;font-variant-numeric:tabular-nums}
+.d-cap{fill:var(--dim);font-size:17px;text-anchor:middle}
+svg.stale .d-big{opacity:.4}
+.d-unit{cursor:pointer}
+.d-unit rect{fill:transparent;stroke:var(--line);stroke-width:1.5}
+.d-unit text{fill:var(--dim);font-size:18px;text-anchor:middle}
+
+.center{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(10px,2.4vh,26px);text-align:center;min-width:0}
+.ename{font-size:clamp(18px,1.6vw,26px);font-weight:600;line-height:1.15}
+.edesc{color:var(--dim);font-size:clamp(13px,1vw,15px);line-height:1.35;margin-top:6px}
+.gearbox{display:flex;align-items:center;gap:10px}
+.gear{display:flex;align-items:baseline;gap:6px;font-size:clamp(60px,11vh,130px);font-weight:600;line-height:.9;font-variant-numeric:tabular-nums}
+.gear small{font-size:.38em;color:var(--dim);font-weight:500}
+.paddle{width:52px;height:52px;flex:none;border-radius:50%;border:1px solid var(--line);background:var(--bar);font-size:26px;line-height:1;cursor:pointer}
+.paddle:active{border-color:var(--accent)}
+.thr{width:100%;display:grid;gap:6px;color:var(--dim);font-size:13px}
+.thr .bar{position:relative;height:6px;border-radius:3px;background:var(--track);overflow:hidden}
+.thr .fill{position:absolute;top:0;bottom:0;left:0;width:0;background:var(--accent);border-radius:3px;will-change:width}
+
+.pedals{position:relative;display:grid;min-height:0}
+.pad{position:relative;border-radius:20px;background:var(--bar);border:1px solid var(--line);touch-action:none;
+  overflow:hidden;display:flex;justify-content:center;padding-top:18px;color:var(--dim);font-size:13px;cursor:ns-resize}
+.pad.active{border-color:var(--accent)}
+.pad .lvl{position:absolute;left:0;right:0;bottom:0;height:0;background:linear-gradient(to top,var(--accent),var(--accent-soft));will-change:height}
+.pad .lbl{position:relative;text-align:center;pointer-events:none}
+.pad .pct{display:block;font-size:26px;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums}
+.pad .sub{position:absolute;bottom:14px;left:6px;right:6px;text-align:center;font-size:12px;line-height:1.3;pointer-events:none}
+
+/* ---- engine strip: all eight in one row ---- */
+.picker{display:flex;gap:clamp(6px,.8vw,12px);min-width:0}
+.card{flex:1 1 0;min-width:0;text-align:left;background:var(--bar);border:1px solid var(--line);border-radius:14px;
+  padding:10px 12px;display:flex;flex-direction:column;gap:7px;cursor:pointer}
+.card[aria-pressed="true"]{border-color:var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--bar)}
+.card .cname{font-weight:600;font-size:clamp(13px,1.05vw,16px);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .cspec,.card .cdesc{display:none}
+.card canvas{width:100%;height:14px;display:block}
+
+/* ---- controls ---- */
+footer{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) auto;gap:clamp(12px,1.6vw,26px);align-items:center}
+.start{height:52px;min-width:156px;padding:0 24px;border-radius:26px;border:0;background:var(--accent);color:#fff;
+  font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap}
+.start.on{background:var(--bar);color:var(--ink);box-shadow:inset 0 0 0 2px var(--accent)}
 .start:disabled{opacity:.5}
-.slider{display:flex;flex-direction:column;gap:2px;color:var(--dim);font-size:12px;letter-spacing:.16em;min-width:0}
+.slider{display:flex;flex-direction:column;color:var(--dim);font-size:13px;min-width:0}
 .slider .row{display:flex;justify-content:space-between}
-.slider .row span:last-child{color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:.04em}
-input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:64px;background:transparent;cursor:pointer;touch-action:pan-y}
+.slider .row span:last-child{color:var(--ink);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:40px;background:transparent;cursor:pointer;touch-action:pan-y}
 input[type=range]:focus{outline:none}
-input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:4px;background:#262a33}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:38px;height:38px;border-radius:50%;background:var(--text);margin-top:-15px;border:0}
-input[type=range]::-moz-range-track{height:8px;border-radius:4px;background:#262a33}
-input[type=range]::-moz-range-thumb{width:38px;height:38px;border-radius:50%;background:var(--text);border:0}
-.toggles{display:flex;gap:10px}
-.tog{min-width:108px;height:64px;border-radius:16px;border:1px solid var(--line);background:var(--panel);color:var(--dim);
-  font-size:13px;font-weight:600;letter-spacing:.14em;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
-.tog em{font-style:normal;font-size:11px;font-weight:500;letter-spacing:.1em}
-.tog[aria-pressed="true"]{color:var(--text);border-color:var(--accent);background:var(--accent-soft)}
-.hint{color:var(--dim);font-size:13px;text-align:center;line-height:1.6}
-kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
-.overlay{position:fixed;inset:0;background:rgba(6,7,9,.9);display:none;align-items:center;justify-content:center;
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--track)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;border-radius:50%;background:var(--ink);margin-top:-12px;border:0}
+input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--track)}
+input[type=range]::-moz-range-thumb{width:30px;height:30px;border-radius:50%;background:var(--ink);border:0}
+.toggles{display:flex;gap:8px}
+.tog{min-width:92px;height:52px;border-radius:14px;border:1px solid var(--line);background:var(--bar);color:var(--dim);
+  font-size:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.tog em{font-style:normal;font-size:15px;font-weight:600;color:var(--ink)}
+.tog[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+
+/* ---- overlays ---- */
+.overlay{position:fixed;inset:0;background:var(--scrim);display:none;align-items:center;justify-content:center;
   flex-direction:column;gap:18px;z-index:10;text-align:center;padding:24px;overflow-y:auto}
 .overlay.show{display:flex}
 .overlay h2{font-weight:500;font-size:28px}
 .overlay p{color:var(--dim);max-width:520px;line-height:1.5}
-.overlay .big{height:80px;padding:0 48px;border-radius:40px;border:0;background:var(--accent);color:#fff;font-size:20px;font-weight:700;letter-spacing:.12em;cursor:pointer}
-.sheet{width:100%;max-width:620px;background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:24px;text-align:left;
+.overlay .big{height:72px;padding:0 44px;border-radius:36px;border:0;background:var(--accent);color:#fff;font-size:19px;font-weight:600;cursor:pointer}
+.sheet{width:100%;max-width:620px;background:var(--bar);border:1px solid var(--line);border-radius:24px;padding:24px;text-align:left;
   display:flex;flex-direction:column;gap:18px;margin:auto;-webkit-user-select:text;user-select:text}
 .sheet h2{font-size:24px}
 .state{font-size:17px;line-height:1.45}
@@ -133,22 +174,29 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
 .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:15px}
 .kv dt{color:var(--dim)} .kv dd{font-variant-numeric:tabular-nums}
 .sheet .btns{display:flex;gap:12px;flex-wrap:wrap}
-.sheet .btns button{min-height:64px;padding:0 28px;border-radius:16px;border:1px solid var(--line);background:var(--panel2);font-size:16px;font-weight:600;cursor:pointer}
+.sheet .btns button{min-height:56px;padding:0 24px;border-radius:16px;border:1px solid var(--line);background:var(--bg);font-size:16px;font-weight:600;cursor:pointer}
 .sheet .btns .primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.sheet h3{font-size:13px;letter-spacing:.16em;color:var(--dim);font-weight:600}
+.sheet h3{font-size:15px;color:var(--dim);font-weight:600}
 .tips{padding-left:20px;display:flex;flex-direction:column;gap:6px;color:var(--dim);line-height:1.45;font-size:14px}
-.tips b{color:var(--text);font-weight:600}
-@media (max-width:1100px){
-  footer{grid-template-columns:1fr 1fr} .start{grid-column:1 / -1} .toggles{grid-column:1 / -1}
-  .toggles .tog{flex:1}
+.tips b{color:var(--ink);font-weight:600}
+
+/* Narrower car windows: controls wrap to two rows. */
+@media (max-width:1150px){
+  footer{grid-template-columns:auto minmax(0,1fr) minmax(0,1fr)}
+  .toggles{grid-column:1 / -1} .toggles .tog{flex:1}
 }
-@media (max-width:860px){
-  body{padding-block:14px 12px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));gap:14px}
-  main{grid-template-columns:1fr} .pedals{min-height:200px}
-  footer{grid-template-columns:1fr;gap:6px} .cluster{padding:20px}
-  .gearbox{margin-left:0}
-  header{flex-wrap:wrap;gap:10px} .diag{order:3;width:100%;margin-left:0;text-align:left} #gps{margin-left:auto}
-  .card{flex-basis:168px}
+/* Phones and portrait screens: stack and let the page scroll. */
+@media (max-width:760px),(max-aspect-ratio:4/5){
+  body{height:auto;min-height:100vh;overflow:auto;grid-template-rows:none;padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px))}
+  main,body.gpsmode main{grid-template-columns:1fr 1fr;grid-template-rows:auto}
+  .center{grid-column:1 / -1;order:-1}
+  .dial{aspect-ratio:1}
+  .pedals{grid-column:1 / -1;height:150px}
+  .picker{overflow-x:auto;padding-bottom:4px}
+  .card{flex:0 0 136px}
+  footer{grid-template-columns:1fr 1fr}
+  .start{grid-column:1 / -1}
+  header{flex-wrap:wrap} .diag{order:3;width:100%;margin-left:0;text-align:left} #gps{margin-left:auto}
 }
 </style>
 </head>
@@ -166,35 +214,34 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
 })();
 </script>
 <header>
-  <div class="brand">ENGINE SOUND</div>
+  <div class="brand">Engine sound</div>
+  <div class="keys">Keys: W accelerates, S brakes, Q and E shift.</div>
   <div class="diag" id="diag"></div>
   <button class="pill" id="gps" hidden aria-label="Location check"><i></i><span></span></button>
   <div class="pill" id="status"><i></i><span>Engine off</span></div>
+  <button class="iconbtn" id="theme" aria-label="Switch to light mode" data-mode="dark">
+    <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
+    <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.6A8.2 8.2 0 1 1 9.4 4a6.6 6.6 0 0 0 10.6 10.6z"/></svg>
+  </button>
 </header>
 
-<main>
-  <section class="cluster">
-    <div class="engine"><b id="pname"></b> &nbsp;·&nbsp; <span id="pdesc"></span></div>
-    <div class="readout">
-      <div class="speed"><div class="spd" id="spd">0</div><button class="unit" id="unit" aria-label="Switch speed units">km/h</button></div>
-      <div class="gearbox">
-        <button class="paddle" id="pdn" aria-label="Shift down" hidden>−</button>
-        <div class="gear"><b><small id="gmode">P</small><span id="gnum"></span></b><span>GEAR</span></div>
-        <button class="paddle" id="pup" aria-label="Shift up" hidden>+</button>
-      </div>
+<main id="cluster">
+  <div class="dial"><svg id="tach" viewBox="0 0 400 400" role="img" aria-label="Rev counter"></svg></div>
+  <section class="center">
+    <div><div class="ename" id="pname"></div><div class="edesc" id="pdesc"></div></div>
+    <div class="gearbox">
+      <button class="paddle" id="pdn" aria-label="Shift down" hidden>−</button>
+      <div class="gear" aria-label="Gear"><small id="gmode">P</small><span id="gnum"></span></div>
+      <button class="paddle" id="pup" aria-label="Shift up" hidden>+</button>
     </div>
-    <div>
-      <div class="rpmrow"><span>RPM</span><b id="rpm">0</b></div>
-      <div class="bar"><div class="red" id="redzone"></div><div class="fill" id="rpmfill"></div></div>
-      <div class="ticks" id="ticks"></div>
-    </div>
-    <div class="meter">THROTTLE <div class="bar"><div class="fill" id="thrfill"></div></div></div>
+    <div class="thr"><span>Throttle</span><div class="bar"><div class="fill" id="thrfill"></div></div></div>
   </section>
+  <div class="dial"><svg id="speedo" viewBox="0 0 400 400" role="img" aria-label="Speedometer"></svg></div>
   <section class="pedals" id="pedals">
     <div class="pad" id="pad">
       <div class="lvl" id="padlvl"></div>
-      <div class="lbl">THROTTLE<span class="pct" id="padpct">0%</span></div>
-      <div class="sub" id="padsub">press &amp; drag up</div>
+      <div class="lbl">Throttle<span class="pct" id="padpct">0%</span></div>
+      <div class="sub" id="padsub">Press and drag up</div>
     </div>
   </section>
 </main>
@@ -202,21 +249,20 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
 <nav class="picker" id="picker" aria-label="Engines"></nav>
 
 <footer>
-  <button class="start" id="start">START ENGINE</button>
-  <label class="slider"><div class="row"><span>VOLUME</span><span id="volv"></span></div><input type="range" id="vol" min="0" max="100" step="1"></label>
-  <label class="slider"><div class="row"><span>EXHAUST</span><span id="openv"></span></div><input type="range" id="open" min="0" max="100" step="1"></label>
+  <button class="start" id="start">Start engine</button>
+  <label class="slider"><div class="row"><span>Volume</span><span id="volv"></span></div><input type="range" id="vol" min="0" max="100" step="1"></label>
+  <label class="slider"><div class="row"><span>Exhaust</span><span id="openv"></span></div><input type="range" id="open" min="0" max="100" step="1"></label>
   <div class="toggles">
-    <button class="tog" id="tSrc" aria-label="Speed source">SPEED<em id="tSrcV">PAD</em></button>
-    <button class="tog" id="tPops" aria-pressed="true">POPS<em id="tPopsV">ON</em></button>
-    <button class="tog" id="tMan" aria-pressed="false">GEARBOX<em id="tManV">AUTO</em></button>
+    <button class="tog" id="tSrc" aria-label="Speed source"><span>Speed</span><em id="tSrcV">GPS</em></button>
+    <button class="tog" id="tPops" aria-pressed="true"><span>Pops</span><em id="tPopsV">On</em></button>
+    <button class="tog" id="tMan" aria-pressed="false"><span>Gearbox</span><em id="tManV">Auto</em></button>
   </div>
 </footer>
-<div class="hint"><kbd>W</kbd>/<kbd>↑</kbd> throttle · <kbd>1</kbd>–<kbd>9</kbd> partial throttle · <kbd>S</kbd>/<kbd>↓</kbd> brake · <kbd>Q</kbd>/<kbd>E</kbd> shift down/up (switches to manual) · <kbd>G</kbd> drops the test GPS signal. In the car, the Tesla media volume also applies.</div>
 
 <div class="overlay" id="resume">
   <h2>Audio paused</h2>
   <p>The browser suspended audio while the page was hidden.</p>
-  <button class="big" id="resumeBtn">TAP TO RESUME</button>
+  <button class="big" id="resumeBtn">Tap to resume</button>
 </div>
 <div class="overlay" id="fatal">
   <h2 id="fatalTitle">Not supported</h2>
@@ -229,7 +275,7 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
     <p class="state" id="gpsState"></p>
     <dl class="kv" id="gpsKv"></dl>
     <div class="btns"><button class="primary" id="gpsAsk">Allow location</button><button id="gpsClose">Close</button><button id="gpsTest">Test without driving</button></div>
-    <h3>IN THE TESLA</h3>
+    <h3>In the Tesla</h3>
     <ul class="tips">
       <li>Open the page from its <b>https://</b> address and bookmark it. Location never works from a plain http address or inside another app's preview.</li>
       <li>When the car asks to share your location, tap <b>Allow</b>.</li>
@@ -1400,11 +1446,28 @@ class Car {
   let ctx = null, engine = null, timer = 0, lastT = 0, offFor = 0, starting = false;
   let keyThr = 0, padThr = 0, keyBrk = 0, RPM_MAX = 7000;
 
+  // ---------- light / dark ----------
+  // Follows the car's (or system's) setting until the driver picks one with the sun/moon button.
+  const schemeQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+  let theme = store.get('theme', null);
+  const effTheme = () => theme || (schemeQ && schemeQ.matches ? 'light' : 'dark');
+  function applyTheme() {
+    const root = document.documentElement, eff = effTheme();
+    if (theme) root.setAttribute('data-theme', theme); else root.removeAttribute('data-theme');
+    $('theme').dataset.mode = eff;
+    $('theme').setAttribute('aria-label', eff === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.setAttribute('content', eff === 'dark' ? '#0c1015' : '#e6e9ed');
+    for (const [cv, p] of firingCanvases) drawFiring(cv, p);
+  }
+  $('theme').addEventListener('click', () => { theme = effTheme() === 'dark' ? 'light' : 'dark'; store.set('theme', theme); applyTheme(); });
+  if (schemeQ && schemeQ.addEventListener) schemeQ.addEventListener('change', () => { if (!theme) applyTheme(); });
+
   // ---------- engine picker ----------
+  const firingCanvases = [];
   function drawFiring(cv, p) {
     const c = cv.getContext('2d'); if (!c) return;
-    const cs = getComputedStyle(document.documentElement), col0 = cs.getPropertyValue('--text').trim() || '#eceef2',
-      col1 = cs.getPropertyValue('--accent').trim() || '#ff5a36', colL = cs.getPropertyValue('--line').trim() || '#23262e';
+    const cs = getComputedStyle(document.documentElement), col0 = cs.getPropertyValue('--ink').trim() || '#e8edf3',
+      col1 = cs.getPropertyValue('--accent').trim() || '#ff5b2e', colL = cs.getPropertyValue('--line').trim() || '#27313d';
     const W = cv.width, H = cv.height;
     c.clearRect(0, 0, W, H); c.fillStyle = colL; c.fillRect(0, H - 3, W, 3);
     for (const f of p.firing) {
@@ -1422,17 +1485,61 @@ class Car {
       const cv = document.createElement('canvas'); cv.width = 320; cv.height = 36; cv.setAttribute('aria-hidden', 'true');
       const ds = document.createElement('span'); ds.className = 'cdesc'; ds.textContent = p.desc;
       b.append(n, s, cv, ds);
-      b.title = 'Firing pattern over one engine cycle; orange marks the second bank';
+      b.title = p.name + ': ' + p.spec + '. The bars show its firing pattern over one engine cycle.';
       b.addEventListener('click', () => selectProfile(id));
       wrap.appendChild(b);
+      firingCanvases.push([cv, p]);
       drawFiring(cv, p);
     }
+  }
+
+  // ---------- gauges: round dials with a 250-degree sweep, needle, red zone and a lit arc ----------
+  const A0 = -125, A1 = 125;
+  const polar = (r, deg) => { const a = (deg - 90) * Math.PI / 180; return [200 + r * Math.cos(a), 200 + r * Math.sin(a)]; };
+  const f1 = (x) => x.toFixed(1);
+  function arcPath(r, d0, d1) {
+    const p = polar(r, d0), q = polar(r, d1);
+    return 'M' + f1(p[0]) + ' ' + f1(p[1]) + ' A' + r + ' ' + r + ' 0 ' + (d1 - d0 > 180 ? 1 : 0) + ' 1 ' + f1(q[0]) + ' ' + f1(q[1]);
+  }
+  function buildDial(svg, o) {
+    const ang = (v) => A0 + (A1 - A0) * Math.max(0, Math.min(1, v / o.max));
+    let h = '<circle cx="200" cy="200" r="195" class="d-face"/><path d="' + arcPath(176, A0, A1) + '" class="d-track"/>';
+    if (o.red < o.max) h += '<path d="' + arcPath(176, ang(o.red), A1) + '" class="d-red"/>';
+    h += '<path d="' + arcPath(176, A0, A1) + '" class="d-live" pathLength="1000" stroke-dasharray="1000" stroke-dashoffset="1000"/>';
+    const steps = Math.round(o.max / o.minor);
+    for (let i = 0; i <= steps; i++) {
+      const v = i * o.minor, major = i % Math.round(o.major / o.minor) === 0, d = ang(v), red = v >= o.red ? ' red' : '';
+      const p = polar(major ? 148 : 158, d), q = polar(167, d);
+      h += '<line x1="' + f1(p[0]) + '" y1="' + f1(p[1]) + '" x2="' + f1(q[0]) + '" y2="' + f1(q[1]) + '" class="d-tick' + (major ? ' major' : '') + red + '"/>';
+      if (major) { const t = polar(126, d); h += '<text x="' + f1(t[0]) + '" y="' + f1(t[1]) + '" class="d-num' + (o.small ? ' small' : '') + red + '">' + o.label(v) + '</text>'; }
+    }
+    h += o.readout;
+    h += '<g class="d-needle"><path d="M195 214 L198.7 44 L201.3 44 L205 214 Z"/><path d="M196 214 L204 214 L202.5 238 L197.5 238 Z" opacity=".75"/></g>';
+    h += '<circle cx="200" cy="200" r="13" class="d-hub"/>';
+    svg.innerHTML = h;
+    return { svg, ang, needle: svg.querySelector('.d-needle'), live: svg.querySelector('.d-live') };
+  }
+  function setDial(D, v) {
+    const a = D.ang(v);
+    D.needle.setAttribute('transform', 'rotate(' + a.toFixed(2) + ' 200 200)');
+    D.live.style.strokeDashoffset = String(Math.round(1000 * (1 - (a - A0) / (A1 - A0))));
+  }
+  let tach = null, speedo = null, speedoMph = null;
+  function buildTach() {
+    tach = buildDial($('tach'), { max: RPM_MAX, major: 1000, minor: RPM_MAX <= 5000 ? 250 : 500, red: P.redline, label: (v) => String(v / 1000),
+      readout: '<text x="200" y="322" class="d-mid" id="rpm">0</text><text x="200" y="352" class="d-cap">rpm</text>' });
+  }
+  function buildSpeedo() {
+    speedoMph = mph;
+    speedo = buildDial($('speedo'), { max: mph ? 160 : 240, major: 20, minor: 10, red: Infinity, small: true, label: (v) => String(v),
+      readout: '<text x="200" y="326" class="d-big" id="spd">0</text>' +
+        '<g class="d-unit" id="unit" role="button" tabindex="0" aria-label="Switch speed units"><rect x="166" y="340" width="68" height="30" rx="9"/>' +
+        '<text x="200" y="361">' + (mph ? 'mph' : 'km/h') + '</text></g>' });
   }
   function showProfile() {
     $('pname').textContent = P.name; $('pdesc').textContent = P.desc;
     RPM_MAX = Math.ceil((P.limiter + 300) / 1000) * 1000;
-    $('redzone').style.width = (100 * (1 - P.redline / RPM_MAX)) + '%';
-    $('ticks').innerHTML = Array.from({ length: RPM_MAX / 1000 + 1 }, (_, i) => '<span>' + i + '</span>').join('');
+    buildTach();
     for (const b of document.querySelectorAll('.card')) b.setAttribute('aria-pressed', String(b.dataset.id === pid));
   }
   function selectProfile(id) {
@@ -1442,7 +1549,7 @@ class Car {
     if (engine) engine.post({ type: 'profile', profile: P });   // the synth crossfades to the new engine
     showProfile();
   }
-  buildPicker(); showProfile();
+  buildPicker(); showProfile(); buildSpeedo(); applyTheme();
   const cur = document.querySelector('.card[aria-pressed="true"]'); if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
   // ---------- sliders and toggles ----------
@@ -1452,16 +1559,16 @@ class Car {
   showSliders();
   volEl.addEventListener('input', () => { vol = volEl.value / 100; store.set('vol', vol); showSliders(); });
   openEl.addEventListener('input', () => { open = openEl.value / 100; store.set('open', open); showSliders(); });
-  const SRC_NAMES = { pads: 'PEDAL', sim: 'TEST', gps: 'GPS' };
+  const SRC_NAMES = { pads: 'Pedal', sim: 'Test', gps: 'GPS' };
   function showToggles() {
-    $('tPops').setAttribute('aria-pressed', String(pops)); $('tPopsV').textContent = pops ? 'ON' : 'OFF';
-    $('tMan').setAttribute('aria-pressed', String(manual)); $('tManV').textContent = manual ? 'MANUAL' : 'AUTO';
+    $('tPops').setAttribute('aria-pressed', String(pops)); $('tPopsV').textContent = pops ? 'On' : 'Off';
+    $('tMan').setAttribute('aria-pressed', String(manual)); $('tManV').textContent = manual ? 'Manual' : 'Auto';
     $('pdn').hidden = !manual; $('pup').hidden = !manual;
-    $('unit').textContent = mph ? 'mph' : 'km/h';
+    if (speedoMph !== mph) buildSpeedo();
     $('tSrc').setAttribute('aria-pressed', String(src === 'gps')); $('tSrcV').textContent = SRC_NAMES[src];
     // Driving on GPS there is nothing to press, so the pedal goes away entirely (no stray throttle from a swipe).
     document.body.classList.toggle('gpsmode', src === 'gps');
-    $('padsub').textContent = src === 'sim' ? 'drives the test car' : 'press & drag up';
+    $('padsub').textContent = src === 'sim' ? 'Drives the test car' : 'Press and drag up';
     $('gpsTest').textContent = src === 'sim' ? 'Back to real GPS' : 'Test without driving';
   }
 
@@ -1585,7 +1692,10 @@ class Car {
   showToggles();
   $('tPops').addEventListener('click', () => { pops = !pops; store.set('pops', pops); showToggles(); });
   $('tMan').addEventListener('click', () => { manual = !manual; store.set('manual', manual); showToggles(); });
-  $('unit').addEventListener('click', () => { mph = !mph; store.set('mph', mph); showToggles(); });
+  // The km/h / mph tag under the speed is rebuilt with the dial, so listen on the dial itself.
+  const toggleUnits = () => { mph = !mph; store.set('mph', mph); showToggles(); };
+  $('speedo').addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#unit')) toggleUnits(); });
+  $('speedo').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('#unit')) { e.preventDefault(); toggleUnits(); } });
   function paddle(dir) {
     if (!manual) { manual = true; store.set('manual', true); showToggles(); }
     sim.manual = true; sim.paddle(dir);
@@ -1702,15 +1812,15 @@ class Car {
     } else offFor = 0;
   }
 
-  // ---------- visuals (capped at 30 fps) ----------
-  const el = { spd: $('spd'), rpm: $('rpm'), fill: $('rpmfill'), thr: $('thrfill'), status: $('status'), start: $('start'),
+  // ---------- visuals (every animation frame, so the needles sweep smoothly) ----------
+  const el = { thr: $('thrfill'), status: $('status'), start: $('start'),
     gmode: $('gmode'), gnum: $('gnum'), padLvl: $('padlvl'), padPct: $('padpct'), gps: $('gps') };
   function gpsChip() {
     if (src === 'pads') return null;
     const now = Date.now(), hz = tracker.rateHz(now).toFixed(1);
-    if (parked) return { cls: 'ok', text: (src === 'sim' ? 'TEST GPS' : 'GPS') + ' · stopped' };
-    if (src === 'sim') return gsim.lost ? { cls: 'err', text: 'TEST GPS · signal lost (press G)' }
-      : { cls: est.stale ? 'err' : 'ok', text: (est.stale ? 'TEST GPS · waiting' : 'TEST GPS · ' + hz + '/s') + ' · true ' + kmh(gsim.v) };
+    if (parked) return { cls: 'ok', text: (src === 'sim' ? 'Test GPS' : 'GPS') + ' · stopped' };
+    if (src === 'sim') return gsim.lost ? { cls: 'err', text: 'Test GPS · signal lost (press G)' }
+      : { cls: est.stale ? 'err' : 'ok', text: (est.stale ? 'Test GPS · waiting' : 'Test GPS · ' + hz + '/s') + ' · true ' + kmh(gsim.v) };
     switch (gpsState) {
       case 'waiting': return { cls: '', text: 'GPS · waiting' };
       case 'active':
@@ -1723,20 +1833,21 @@ class Car {
       default: return { cls: '', text: 'GPS · tap to check' };
     }
   }
-  let lastDraw = 0, lastState = '';
+  let lastDraw = 0, lastState = '', lastSpd = '', lastRpm = '';
   function draw(ts) {
     requestAnimationFrame(draw);
-    if (ts - lastDraw < 33) return; lastDraw = ts;
+    if (ts - lastDraw < 15) return; lastDraw = ts;
     const r = sim.rpm;
-    const shown = src === 'pads' ? sim.v : parked ? 0 : est.vNow;
-    el.spd.textContent = String(Math.round(shown * (mph ? 2.23694 : 3.6)));
-    el.spd.classList.toggle('stale', src !== 'pads' && est.stale && !parked && sim.state === 'run');
+    const shown = (src === 'pads' ? sim.v : parked ? 0 : est.vNow) * (mph ? 2.23694 : 3.6);
+    const spdTxt = String(Math.round(shown)), rpmTxt = (Math.round(r / 10) * 10).toLocaleString('en-US');
+    if (spdTxt !== lastSpd) { lastSpd = spdTxt; $('spd').textContent = spdTxt; }
+    if (rpmTxt !== lastRpm) { lastRpm = rpmTxt; $('rpm').textContent = rpmTxt; }
+    speedo.svg.classList.toggle('stale', src !== 'pads' && est.stale && !parked && sim.state === 'run');
+    tach.svg.classList.toggle('hot', r >= P.redline);
+    setDial(tach, r); setDial(speedo, shown);
     const chip = gpsChip();
     el.gps.hidden = !chip;
     if (chip) { el.gps.className = 'pill ' + chip.cls; el.gps.querySelector('span').textContent = chip.text; }
-    el.rpm.textContent = String(Math.round(r / 10) * 10);
-    el.fill.style.width = Math.min(100, 100 * r / RPM_MAX) + '%';
-    el.fill.classList.toggle('hot', r >= P.redline);
     el.thr.style.width = (100 * sim.thr) + '%';
     const on = sim.state === 'run';
     el.gmode.textContent = on ? (manual ? 'M' : sim.neutral ? 'N' : 'D') : 'P';
@@ -1750,7 +1861,7 @@ class Car {
       el.status.querySelector('span').textContent = label;
       el.status.classList.toggle('on', sim.state !== 'off');
       const live = sim.state === 'crank' || sim.state === 'catch' || sim.state === 'run';
-      el.start.textContent = live ? 'STOP ENGINE' : 'START ENGINE';
+      el.start.textContent = live ? 'Stop engine' : 'Start engine';
       el.start.classList.toggle('on', live);
     }
   }
