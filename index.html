@@ -1015,7 +1015,7 @@ class SpeedTracker {
   }
   // Every control tick: engine-facing speed (with look-ahead), displayed speed (without), accel, stale.
   tick(now, dt) {
-    if (!this.init) return { v: 0, vNow: 0, a: 0, stale: true, age: Infinity };
+    if (!this.init) return { v: 0, vNow: 0, a: 0, ar: 0, stale: true, age: Infinity };
     // Extrapolate from when the fix was measured; judge staleness by when the last one arrived.
     const age = (now - this.tGood) / 1000, stale = now - this.tArr > this.staleMs, h = Math.max(0, Math.min(age, 1.5));
     // Position-derived speed is about a second late by construction, so it gets extra look-ahead; the
@@ -1025,7 +1025,8 @@ class SpeedTracker {
     if (vNow < 0.8 && Math.abs(a) < 0.5) { vNow = 0; vLead = 0; a = 0; }   // parked: ignore GPS jitter
     const k = this.smooth > 0 ? 1 - Math.exp(-dt / this.smooth) : 1;
     this.outV += (vLead - this.outV) * k; this.outNow += (vNow - this.outNow) * k; this.outA += (a - this.outA) * k;
-    return { v: this.outV, vNow: this.outNow, a: this.outA, stale, age };
+    // ar: the filter's acceleration without the output smoothing, for the pedal inference (which smooths it itself).
+    return { v: this.outV, vNow: this.outNow, a: this.outA, ar: a, stale, age };
   }
 }
 
@@ -1078,6 +1079,7 @@ class Car {
     // cylinder lights while catching, cold-engine roughness, exhaust valve boost and fast idle.
     this.stEng = 0; this.stN = 0; this.fireP = 1; this.rough = 0; this.openAdd = 0; this.cold = 0;
     this.crankDur = -1; this.runT = 99; this.coldAmt = 0; this.flareAmt = 0; this.offClock = -1e9; this.warmStart = false;
+    this.aSm = 0; this.lifted = false; this.lastUp = true;   // GPS pedal inference, and the last shift direction
     this.setProfile(p);
   }
   // Swap engines without stopping: keep speed and state, pick a sensible gear for the new gearbox.
@@ -1113,17 +1115,27 @@ class Car {
     return Math.max(locked, conv);
   }
   // External speed (GPS): the car follows measured speed, and the pedals are inferred from acceleration.
-  setExternal(v, a, stale) {
+  // GPS gives about one reading a second, each a little off, so the raw acceleration jitters even at a
+  // steady speed. The pedal is read from a slower, dead-banded acceleration instead: holding speed is a
+  // steady cruise throttle, a lift needs a clear and sustained slow-down, and the pedal moves like a foot.
+  setExternal(v, a, stale, dt = 1 / 60) {
     this.ext = true;
     if (stale && !this.neutral) { this.neutral = true; this.liftPeak = 0; this.overrun = 0; this.shift = null; }
-    this.extV = v; this.acc = a;
-    this.thrIn = stale ? 0 : this.throttleFor(a, v);
+    this.extV = v;
+    this.aSm += (a - this.aSm) * (1 - Math.exp(-dt / 0.8));
+    this.acc = this.aSm;
+    if (this.lifted) { if (this.aSm > -0.25) this.lifted = false; } else if (this.aSm < -0.65) this.lifted = true;
+    // Soft dead band: under 0.3 m/s2 counts as holding speed, fading to the full value by 0.7 m/s2.
+    const aD = this.aSm * Math.min(1, Math.max(0, (Math.abs(this.aSm) - 0.3) / 0.4));
+    const target = stale || this.lifted ? 0 : this.throttleFor(aD, v);
+    const tau = target > this.thrIn ? 0.25 : (this.lifted || stale ? 0.12 : 0.5);
+    this.thrIn += (target - this.thrIn) * (1 - Math.exp(-dt / tau));
     if (!stale && this.neutral) {
       this.neutral = false; this.v = v; this.engageT = this.clock;
       if (!this.manual) this.gear = this.selectGear(this.thrIn, true);
       this.lastShift = this.clock;
     }
-    this.brakeIn = stale ? 0 : Math.max(0, Math.min(1, (-a - 1.2) / 5));
+    this.brakeIn = stale ? 0 : Math.max(0, Math.min(1, (-this.aSm - 1.2) / 5));
   }
   clearExternal() { if (this.ext) { this.ext = false; this.neutral = false; } }
   // Pedal needed for acceleration a at speed v, against the best force this car can make at that
@@ -1159,7 +1171,7 @@ class Car {
   beginShift(to) {
     const up = to > this.gear;
     this.shift = { from: this.gear, to, t: 0, up, rpm0: this.rpm, dur: up ? 0.3 - 0.12 * this.thr : 0.28, blip: 0 };
-    this.lastShift = this.clock;
+    this.lastShift = this.clock; this.lastUp = up;
   }
   autoShift() {
     const d = this.d, p = this.p, n = d.gears.length, since = this.clock - this.lastShift;
@@ -1182,9 +1194,12 @@ class Car {
       down = Math.max(down, d.downLight + (d.downFull + 0.3 * (p.redline - d.downFull) - d.downLight) * Math.pow(bf, 0.7));
       lowMax = Math.min(p.redline * 0.8, down * 1.5);   // gentle slowing keeps the blips moderate
     }
+    // No hunting: reversing the last shift within a few seconds needs a clear margin, so a steady cruise
+    // that sits near a shift point stays in one gear.
+    const rev = since < 4 ? 250 : 0;
     // Like a sport mode: hold the gear on a closed throttle (engine braking, crackle) unless it would over-rev.
-    if (rCur > up && this.gear < n && since > 0.6 && (this.thrIn > 0.08 || rCur > d.upFull)) this.beginShift(this.gear + 1);
-    else if (rCur < down && this.gear > 1 && since > (braking ? 0.45 : 0.8) && this.gearRpm(this.gear - 1, this.v) < lowMax) this.beginShift(this.gear - 1);
+    if (rCur > up + (this.lastUp ? 0 : rev) && this.gear < n && since > 0.6 && (this.thrIn > 0.08 || rCur > d.upFull)) this.beginShift(this.gear + 1);
+    else if (rCur < down - (this.lastUp && !braking ? rev : 0) && this.gear > 1 && since > (braking ? 0.45 : 0.8) && this.gearRpm(this.gear - 1, this.v) < lowMax) this.beginShift(this.gear - 1);
   }
   step(dt, rnd = Math.random) {
     const p = this.p, d = this.d, T = p.turbo;
@@ -1673,8 +1688,8 @@ class Car {
       const feedOk = src === 'sim' ? !gsim.lost : gpsState === 'active';
       if (!est.stale) parked = false;
       else if (!parked && tracker.init && feedOk && est.vNow < 2.5 && !sim.neutral) parked = true;
-      if (parked) sim.setExternal(0, 0, false);
-      else sim.setExternal(est.v, est.a, est.stale);   // lost signal: the car drops to neutral and the revs ease to idle
+      if (parked) sim.setExternal(0, 0, false, dt);
+      else sim.setExternal(est.v, est.ar, est.stale, dt);   // lost signal: the car drops to neutral and the revs ease to idle
     }
     sim.step(dt);
     if (engine) engine.post({ type: 'ctl', v: { rpm: sim.rpmOut, thr: sim.thrOut, load: sim.load, ign: sim.ign, starter: sim.starter,
