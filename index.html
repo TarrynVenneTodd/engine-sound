@@ -1031,19 +1031,29 @@ class Car {
     this.lastShift = this.clock;
   }
   autoShift() {
-    const d = this.d, n = d.gears.length, since = this.clock - this.lastShift;
+    const d = this.d, p = this.p, n = d.gears.length, since = this.clock - this.lastShift;
     const rCur = this.gearRpm(this.gear, this.v);
     const up = d.upLight + (d.upFull - d.upLight) * Math.pow(this.thr, 1.4);
-    const down = d.downLight + (d.downFull - d.downLight) * this.thr;
+    let down = d.downLight + (d.downFull - d.downLight) * this.thr;
     if (this.thrIn > 0.8 && this.thrLow < 0.5 && this.gear > 1 && since > 0.4) {   // kickdown: a sharp pedal stab
       let g = this.gear;
       while (g > 1 && this.gear - g < 2 && this.gearRpm(g - 1, this.v) < d.upFull - 500) g--;
       this.thrLow = 1;
       if (g < this.gear) { this.beginShift(g); return; }
     }
+    // Slowing down (brakes or regen): downshift early, one gear at a time, blipping each one, the way a
+    // driver or a sport-mode gearbox keeps the engine on the boil into a corner. The harder the car
+    // slows, the higher the revs each downshift happens at.
+    const decel = Math.max(0, -this.acc), braking = this.thrIn < 0.1 && decel > 0.7 && this.v > 3;
+    let lowMax = up - 300;
+    if (braking) {
+      const bf = Math.min(1, (decel - 0.7) / 3);
+      down = Math.max(down, d.downLight + (d.downFull + 0.3 * (p.redline - d.downFull) - d.downLight) * Math.pow(bf, 0.7));
+      lowMax = Math.min(p.redline * 0.8, down * 1.5);   // gentle slowing keeps the blips moderate
+    }
     // Like a sport mode: hold the gear on a closed throttle (engine braking, crackle) unless it would over-rev.
     if (rCur > up && this.gear < n && since > 0.6 && (this.thrIn > 0.08 || rCur > d.upFull)) this.beginShift(this.gear + 1);
-    else if (rCur < down && this.gear > 1 && since > 0.8 && this.gearRpm(this.gear - 1, this.v) < up - 300) this.beginShift(this.gear - 1);
+    else if (rCur < down && this.gear > 1 && since > (braking ? 0.45 : 0.8) && this.gearRpm(this.gear - 1, this.v) < lowMax) this.beginShift(this.gear - 1);
   }
   step(dt, rnd = Math.random) {
     const p = this.p, d = this.d, T = p.turbo;
