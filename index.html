@@ -78,9 +78,6 @@ main{flex:1;display:grid;grid-template-columns:1fr minmax(220px,280px);gap:16px;
 .meter .bar{height:6px;border-radius:3px}
 .meter .fill{background:var(--accent);border-radius:3px}
 .pedals{position:relative;display:grid;min-height:280px}
-.pedals.locked .pad{opacity:.35;pointer-events:none}
-.lock{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;
-  color:var(--text);font-size:16px;line-height:1.5;pointer-events:none}
 .pad{position:relative;border-radius:24px;background:var(--panel);border:1px solid var(--line);touch-action:none;
   overflow:hidden;display:flex;justify-content:center;padding-top:22px;color:var(--dim);font-size:13px;
   letter-spacing:.2em;cursor:ns-resize}
@@ -89,14 +86,18 @@ main{flex:1;display:grid;grid-template-columns:1fr minmax(220px,280px);gap:16px;
 .pad .lbl{position:relative;text-align:center;pointer-events:none}
 .pad .pct{display:block;font-size:32px;color:var(--text);letter-spacing:0;margin-top:6px;font-variant-numeric:tabular-nums;font-weight:300}
 .pad .sub{position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;letter-spacing:.08em;pointer-events:none}
+body.gpsmode .pedals{display:none}
+body.gpsmode main{grid-template-columns:1fr}
 .picker{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin;scroll-snap-type:x proximity}
-.card{flex:0 0 196px;scroll-snap-align:start;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:18px;
-  padding:14px 16px;display:flex;flex-direction:column;gap:6px;cursor:pointer;min-height:132px}
+.card{flex:1 0 128px;scroll-snap-align:start;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:18px;
+  padding:14px 16px;display:flex;flex-direction:column;gap:6px;cursor:pointer}
 .card[aria-pressed="true"]{border-color:var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--panel)}
 .card .cname{font-weight:600;font-size:16px}
 .card .cspec{color:var(--dim);font-size:12px;letter-spacing:.08em;font-variant-numeric:tabular-nums}
 .card canvas{width:100%;height:22px;display:block}
-.card .cdesc{color:var(--dim);font-size:13px;line-height:1.35}
+.card .cdesc{display:none}   /* the chosen engine's description is shown above the speedo */
+/* Touchscreens (the car): no keyboard to hint at, and the audio status line only matters when something is wrong. */
+@media (hover:none), (pointer:coarse){ .hint{display:none} .diag:not(.err){visibility:hidden} }
 footer{display:grid;grid-template-columns:minmax(220px,300px) 1fr 1fr auto;gap:20px;align-items:center}
 .start{height:88px;border-radius:44px;border:0;background:var(--accent);color:#fff;font-size:21px;
   font-weight:700;letter-spacing:.14em;cursor:pointer}
@@ -195,7 +196,6 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
       <div class="lbl">THROTTLE<span class="pct" id="padpct">0%</span></div>
       <div class="sub" id="padsub">press &amp; drag up</div>
     </div>
-    <div class="lock" id="pedLock" hidden>Speed and throttle come from GPS.<br>Drive the car to rev the engine.</div>
   </section>
 </main>
 
@@ -211,7 +211,7 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
     <button class="tog" id="tMan" aria-pressed="false">GEARBOX<em id="tManV">AUTO</em></button>
   </div>
 </footer>
-<div class="hint"><kbd>W</kbd>/<kbd>↑</kbd> throttle · <kbd>1</kbd>–<kbd>9</kbd> partial throttle · <kbd>S</kbd>/<kbd>↓</kbd> brake · <kbd>Q</kbd>/<kbd>E</kbd> shift down/up (switches to manual) · <kbd>G</kbd> drops the simulated GPS signal. In the car, the Tesla media volume also applies.</div>
+<div class="hint"><kbd>W</kbd>/<kbd>↑</kbd> throttle · <kbd>1</kbd>–<kbd>9</kbd> partial throttle · <kbd>S</kbd>/<kbd>↓</kbd> brake · <kbd>Q</kbd>/<kbd>E</kbd> shift down/up (switches to manual) · <kbd>G</kbd> drops the test GPS signal. In the car, the Tesla media volume also applies.</div>
 
 <div class="overlay" id="resume">
   <h2>Audio paused</h2>
@@ -228,7 +228,7 @@ kbd{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var
     <h2 id="gpsTitle">Location check</h2>
     <p class="state" id="gpsState"></p>
     <dl class="kv" id="gpsKv"></dl>
-    <div class="btns"><button class="primary" id="gpsAsk">Allow location</button><button id="gpsClose">Close</button></div>
+    <div class="btns"><button class="primary" id="gpsAsk">Allow location</button><button id="gpsClose">Close</button><button id="gpsTest">Test without driving</button></div>
     <h3>IN THE TESLA</h3>
     <ul class="tips">
       <li>Open the page from its <b>https://</b> address and bookmark it. Location never works from a plain http address or inside another app's preview.</li>
@@ -1379,8 +1379,9 @@ class Car {
   let P = PROFILES[pid];
   const sim = new Car(P);
   let vol = store.get('vol', 0.8), open = store.get('open', 0.55), pops = store.get('pops', true),
-    manual = store.get('manual', false), mph = store.get('mph', false), src = store.get('src', 'pads');
-  if (!(src in { pads: 1, sim: 1, gps: 1 })) src = 'pads';
+    manual = store.get('manual', false), mph = store.get('mph', false), src = store.get('src', 'gps');
+  // Real GPS is the default; the simulated GPS is a desk test, chosen from the Location check and never remembered.
+  if (src !== 'pads') src = 'gps';
   let ctx = null, engine = null, timer = 0, lastT = 0, offFor = 0, starting = false;
   let keyThr = 0, padThr = 0, keyBrk = 0, RPM_MAX = 7000;
 
@@ -1402,7 +1403,7 @@ class Car {
       const p = PROFILES[id], b = document.createElement('button');
       b.className = 'card'; b.dataset.id = id;
       const n = document.createElement('span'); n.className = 'cname'; n.textContent = p.name;
-      const s = document.createElement('span'); s.className = 'cspec'; s.textContent = p.spec + ' · ' + p.redline.toLocaleString('en-US') + ' rpm';
+      const s = document.createElement('span'); s.className = 'cspec'; s.textContent = p.spec;
       const cv = document.createElement('canvas'); cv.width = 320; cv.height = 36; cv.setAttribute('aria-hidden', 'true');
       const ds = document.createElement('span'); ds.className = 'cdesc'; ds.textContent = p.desc;
       b.append(n, s, cv, ds);
@@ -1436,15 +1437,17 @@ class Car {
   showSliders();
   volEl.addEventListener('input', () => { vol = volEl.value / 100; store.set('vol', vol); showSliders(); });
   openEl.addEventListener('input', () => { open = openEl.value / 100; store.set('open', open); showSliders(); });
-  const SRC_NAMES = { pads: 'PAD', sim: 'SIM GPS', gps: 'GPS' };
+  const SRC_NAMES = { pads: 'PEDAL', sim: 'TEST', gps: 'GPS' };
   function showToggles() {
     $('tPops').setAttribute('aria-pressed', String(pops)); $('tPopsV').textContent = pops ? 'ON' : 'OFF';
     $('tMan').setAttribute('aria-pressed', String(manual)); $('tManV').textContent = manual ? 'MANUAL' : 'AUTO';
     $('pdn').hidden = !manual; $('pup').hidden = !manual;
     $('unit').textContent = mph ? 'mph' : 'km/h';
-    $('tSrc').setAttribute('aria-pressed', String(src !== 'pads')); $('tSrcV').textContent = SRC_NAMES[src];
-    $('pedals').classList.toggle('locked', src === 'gps'); $('pedLock').hidden = src !== 'gps';
-    $('padsub').textContent = src === 'sim' ? 'drives the simulated car' : 'press & drag up';
+    $('tSrc').setAttribute('aria-pressed', String(src === 'gps')); $('tSrcV').textContent = SRC_NAMES[src];
+    // Driving on GPS there is nothing to press, so the pedal goes away entirely (no stray throttle from a swipe).
+    document.body.classList.toggle('gpsmode', src === 'gps');
+    $('padsub').textContent = src === 'sim' ? 'drives the test car' : 'press & drag up';
+    $('gpsTest').textContent = src === 'sim' ? 'Back to real GPS' : 'Test without driving';
   }
 
   function fatal(title, msg) { $('fatalTitle').textContent = title; $('fatalMsg').textContent = msg; $('fatal').classList.add('show'); }
@@ -1515,13 +1518,13 @@ class Car {
     // code 3 (timeout): keep waiting, the watch and the poll keep trying
   }
   function setSource(next) {
-    src = next; store.set('src', src); parked = false;
+    src = next; if (src !== 'sim') store.set('src', src); parked = false;
     tracker.reset(); gsim.v = 0; gsim.x = 0; gsim.lost = false; gsim.queue = [];
     if (src === 'gps') startGps(); else stopGps();     // called from a tap, so the permission prompt is allowed
     if (src === 'pads') sim.clearExternal();
     showToggles();
   }
-  $('tSrc').addEventListener('click', () => setSource(src === 'pads' ? 'sim' : src === 'sim' ? 'gps' : 'pads'));
+  $('tSrc').addEventListener('click', () => setSource(src === 'gps' ? 'pads' : 'gps'));
 
   // Location check panel: what the browser is actually delivering.
   const kmh = (v) => Math.round(v * (mph ? 2.23694 : 3.6)) + (mph ? ' mph' : ' km/h');
@@ -1560,7 +1563,9 @@ class Car {
   }
   $('gpsAsk').addEventListener('click', () => { if (gpsState === 'blocked') gpsState = 'off'; startGps(); renderGpsPanel(); });
   $('gpsClose').addEventListener('click', closeGpsPanel);
-  $('gps').addEventListener('click', () => { if (src === 'gps') openGpsPanel(); });
+  // Desk test: a simulated car on the pedal feeds a fake 1-per-second GPS through the same speed filter.
+  $('gpsTest').addEventListener('click', () => { setSource(src === 'sim' ? 'gps' : 'sim'); closeGpsPanel(); });
+  $('gps').addEventListener('click', () => { if (src !== 'pads') openGpsPanel(); });
 
   showToggles();
   $('tPops').addEventListener('click', () => { pops = !pops; store.set('pops', pops); showToggles(); });
@@ -1688,9 +1693,9 @@ class Car {
   function gpsChip() {
     if (src === 'pads') return null;
     const now = Date.now(), hz = tracker.rateHz(now).toFixed(1);
-    if (parked) return { cls: 'ok', text: (src === 'sim' ? 'SIM GPS' : 'GPS') + ' · stopped' };
-    if (src === 'sim') return gsim.lost ? { cls: 'err', text: 'SIM GPS · signal lost (press G)' }
-      : { cls: est.stale ? 'err' : 'ok', text: (est.stale ? 'SIM GPS · waiting' : 'SIM GPS · ' + hz + '/s') + ' · true ' + kmh(gsim.v) };
+    if (parked) return { cls: 'ok', text: (src === 'sim' ? 'TEST GPS' : 'GPS') + ' · stopped' };
+    if (src === 'sim') return gsim.lost ? { cls: 'err', text: 'TEST GPS · signal lost (press G)' }
+      : { cls: est.stale ? 'err' : 'ok', text: (est.stale ? 'TEST GPS · waiting' : 'TEST GPS · ' + hz + '/s') + ' · true ' + kmh(gsim.v) };
     switch (gpsState) {
       case 'waiting': return { cls: '', text: 'GPS · waiting' };
       case 'active':
@@ -1700,7 +1705,7 @@ class Car {
       case 'blocked': return { cls: 'err', text: 'GPS · blocked' };
       case 'unsupported': return { cls: 'err', text: 'GPS · not available' };
       case 'unavailable': return { cls: 'err', text: 'GPS · no position' };
-      default: return { cls: '', text: 'GPS · check location' };
+      default: return { cls: '', text: 'GPS · tap to check' };
     }
   }
   let lastDraw = 0, lastState = '';
