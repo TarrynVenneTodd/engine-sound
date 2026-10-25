@@ -1,7 +1,9 @@
-// Offline cache for Tesla Engine Sound. Serves the cached page right away and refreshes the cache in
-// the background, so the page opens with no signal and picks up updates on the next visit.
-const CACHE = 'engine-sound-v1';
+// Offline cache for Tesla Engine Sound. The page itself comes from the network when there is signal
+// (so updates show on the first load) and from the cache when the network is slow or gone.
+const CACHE = 'engine-sound-v2';
 const CORE = ['./', './index.html'];
+const offline = () => new Response('Offline, and this page has not been cached yet. Open it once with a connection.',
+  { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
@@ -15,20 +17,23 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+  const page = req.mode === 'navigate' || /\/(index\.html)?$/.test(url.pathname);
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const nav = req.mode === 'navigate';
-    const hit = (await cache.match(req, { ignoreSearch: true })) || (nav ? await cache.match('./index.html') : undefined);
-    const fresh = fetch(req).then((res) => {
-      if (res && res.ok) cache.put(nav ? './index.html' : req, res.clone());
+    const cached = page ? (await cache.match('./index.html')) || (await cache.match(req, { ignoreSearch: true }))
+      : await cache.match(req, { ignoreSearch: true });
+    const network = fetch(req).then((res) => {
+      if (res && res.ok) cache.put(page ? './index.html' : req, res.clone());
       return res;
     });
-    if (hit) { e.waitUntil(fresh.catch(() => {})); return hit; }
-    try { return await fresh; }
-    catch (err) {
-      return new Response('Offline, and this page has not been cached yet. Open it once with a connection.',
-        { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    if (page) {
+      const slow = new Promise((r) => setTimeout(() => r(null), 2500));
+      const res = await Promise.race([network.catch(() => null), slow]);
+      if (res) return res;
     }
+    if (cached) { e.waitUntil(network.catch(() => {})); return cached; }
+    try { return await network; } catch (err) { return offline(); }
   })());
 });
